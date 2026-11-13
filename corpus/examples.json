@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "spec": "docs/spec-v0.1.md",
+  "note": "Owned by the spec, not by the implementation. Tests assert the 10/10 split and that the ten invalid cases cover ten distinct diagnostic codes.",
+  "examples": [
+    {
+      "id": "heading_cost",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [100.0, 20.0],
+      "expected": 5.0,
+      "why": "Baseline: f64 arithmetic, division, early return. The smallest program the VM must run.",
+      "code": "fn heading_cost(dist: f64, speed: f64) -> f64 {\n  let t: f64 = dist / speed;\n  if t > 10.0 {\n    return 10.0;\n  }\n  return t;\n}"
+    },
+    {
+      "id": "clamp",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [5.0, 0.0, 3.0],
+      "expected": 3.0,
+      "why": "Two sequential early returns; exercises all-path return analysis.",
+      "code": "fn clamp(x: f64, lo: f64, hi: f64) -> f64 {\n  if x < lo {\n    return lo;\n  }\n  if x > hi {\n    return hi;\n  }\n  return x;\n}"
+    },
+    {
+      "id": "slalom_katamaran",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [8.0, 5.0],
+      "expected": 8,
+      "why": "The motivating example: while loop with a constant bound, float comparison, integer counter. Verifier must infer 8 iterations.",
+      "code": "fn slalom_katamaran(wind: f64, gust: f64) -> i32 {\n  let i: i32 = 0;\n  let steps: i32 = 0;\n  while i < 8 {\n    if wind + gust > 12.0 {\n      steps = steps + 1;\n    }\n    i = i + 1;\n  }\n  return steps;\n}"
+    },
+    {
+      "id": "dot_product",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [[1, 2, 3, 4], [1, 2, 3, 4]],
+      "expected": 30.0,
+      "why": "Array indexing inside a provably bounded loop. The induction variable must be linked to the array length for the bounds proof.",
+      "code": "fn dot_product(a: [f64; 4], b: [f64; 4]) -> f64 {\n  let i: i32 = 0;\n  let s: f64 = 0.0;\n  while i < 4 {\n    s = s + a[i] * b[i];\n    i = i + 1;\n  }\n  return s;\n}"
+    },
+    {
+      "id": "max_in_array",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [[3.5, -1.0, 9.25, 4.0]],
+      "expected": 9.25,
+      "why": "Loop starts at 1 after seeding with a[0]; tests that the verifier does not assume i starts at zero.",
+      "code": "fn max_in_array(a: [f64; 4]) -> f64 {\n  let m: f64 = a[0];\n  let i: i32 = 1;\n  while i < 4 {\n    if a[i] > m {\n      m = a[i];\n    }\n    i = i + 1;\n  }\n  return m;\n}"
+    },
+    {
+      "id": "battery_used",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [10, 7200],
+      "expected": 20,
+      "why": "Pure integer arithmetic including truncating division; no overflow provable at compile time, so runtime trap applies.",
+      "code": "fn battery_used(amps: i32, seconds: i32) -> i32 {\n  return amps * seconds / 3600;\n}"
+    },
+    {
+      "id": "nested_sweep",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [],
+      "expected": 18.0,
+      "why": "Nested bounded loops: the gas bound is 6 x 6 blocks, so the verifier must multiply, not add, iteration bounds.",
+      "code": "fn nested_sweep() -> f64 {\n  let i: i32 = 0;\n  let acc: f64 = 0.0;\n  while i < 6 {\n    let j: i32 = 0;\n    while j < 6 {\n      acc = acc + 0.5;\n      j = j + 1;\n    }\n    i = i + 1;\n  }\n  return acc;\n}"
+    },
+    {
+      "id": "cast_degrees",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [180],
+      "expected": 3.141592653589793,
+      "why": "Explicit i64 -> f64 cast; there are no implicit numeric conversions in the language.",
+      "code": "fn cast_degrees(deg: i64) -> f64 {\n  let d: f64 = deg as f64;\n  return d * 3.141592653589793 / 180.0;\n}"
+    },
+    {
+      "id": "sqrt_margin",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [16.0],
+      "expected": 4.0,
+      "why": "Only correctly-rounded builtins are allowed in the core; sqrt is IEEE-exact and therefore deterministic across engines.",
+      "code": "fn sqrt_margin(margin: f64) -> f64 {\n  if margin < 0.0 {\n    return 0.0;\n  }\n  return sqrt(margin);\n}"
+    },
+    {
+      "id": "catamaran_plan",
+      "expect": "valid",
+      "code_expected": null,
+      "args": [3.0],
+      "expected": 6.0,
+      "why": "Array literal, builtin call inside a loop, accumulator. End-to-end shape of a real generated program.",
+      "code": "fn catamaran_plan(wind: f64) -> f64 {\n  let gains: [f64; 3] = [1.0, 1.5, 2.0];\n  let i: i32 = 0;\n  let best: f64 = 0.0;\n  while i < 3 {\n    let v: f64 = gains[i] * wind;\n    best = max(best, v);\n    i = i + 1;\n  }\n  return best;\n}"
+    },
+    {
+      "id": "spin_state_unchanged",
+      "expect": "invalid",
+      "code_expected": "E_UNBOUNDED_LOOP",
+      "why": "Loop body never changes the induction variable, so no iteration bound can be proven. Must be rejected before execution, not killed by a timer.",
+      "code": "fn spin(x: i32) -> i32 {\n  while x > 0 {\n    x = x;\n  }\n  return x;\n}"
+    },
+    {
+      "id": "recursive_factorial",
+      "expect": "invalid",
+      "code_expected": "E_RECURSION",
+      "why": "Direct recursion is rejected by default in v0.1: no decreasing-measure proof exists yet, and an unbounded stack breaks both memory and gas bounds.",
+      "code": "fn fact(n: i32) -> i32 {\n  if n < 2 {\n    return 1;\n  }\n  return n * fact(n - 1);\n}"
+    },
+    {
+      "id": "index_past_end",
+      "expect": "invalid",
+      "code_expected": "E_INDEX_OOB",
+      "why": "Constant index 10 into a [f64; 8] is statically out of bounds; the verifier needs no SMT solver to reject it.",
+      "code": "fn bad(a: [f64; 8]) -> f64 {\n  return a[10];\n}"
+    },
+    {
+      "id": "mixed_numeric_types",
+      "expect": "invalid",
+      "code_expected": "E_TYPE_MISMATCH",
+      "why": "i32 + f64 does not typecheck; an explicit cast is required, which keeps lowering deterministic.",
+      "code": "fn bad() -> f64 {\n  let x: i32 = 1 + 2.0;\n  return 0.0;\n}"
+    },
+    {
+      "id": "missing_return",
+      "expect": "invalid",
+      "code_expected": "E_MISSING_RETURN",
+      "why": "Only one branch returns; the fall-through path has no value. Every path must return, so the VM never falls off a function.",
+      "code": "fn bad(x: i32) -> i32 {\n  if x > 0 {\n    return 1;\n  }\n}"
+    },
+    {
+      "id": "use_out_of_scope",
+      "expect": "invalid",
+      "code_expected": "E_SCOPE",
+      "why": "let is block-scoped; using x after the if-block closes is a name resolution error, not an uninitialized read.",
+      "code": "fn bad(c: bool) -> i32 {\n  if c {\n    let x: i32 = 1;\n  }\n  return x;\n}"
+    },
+    {
+      "id": "divide_by_zero_literal",
+      "expect": "invalid",
+      "code_expected": "E_DIV_BY_ZERO",
+      "why": "Constant division by zero is rejected at compile time; the runtime trap covers the dynamic case.",
+      "code": "fn bad(x: i32) -> i32 {\n  return x / 0;\n}"
+    },
+    {
+      "id": "wrong_arity",
+      "expect": "invalid",
+      "code_expected": "E_ARITY",
+      "why": "add takes two arguments; calls never fill in defaults, so arity must match exactly.",
+      "code": "fn add(a: i32, b: i32) -> i32 {\n  return a + b;\n}\n\nfn bad() -> i32 {\n  return add(1);\n}"
+    },
+    {
+      "id": "array_size_mismatch",
+      "expect": "invalid",
+      "code_expected": "E_ARRAY_SIZE",
+      "why": "The repeat literal [0.0; 5] has length 5 but the annotation says 4; array lengths are part of the type.",
+      "code": "fn bad() -> f64 {\n  let a: [f64; 4] = [0.0; 5];\n  return a[0];\n}"
+    },
+    {
+      "id": "float_index",
+      "expect": "invalid",
+      "code_expected": "E_INDEX_TYPE",
+      "why": "Indices must be integers; rejecting f64 indices removes a whole class of conversion ambiguity from the bounds analysis.",
+      "code": "fn bad(a: [f64; 4]) -> f64 {\n  return a[1.5];\n}"
+    }
+  ]
+}

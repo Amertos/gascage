@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "updated": "2026-11-13",
+  "note": "A claim gets a number only when CI reproduces it. status=measured requires value and reproduce; any other status requires value=null. tests/claims.test.mjs enforces this.",
+  "claims": [
+    {
+      "id": "gas-bound",
+      "text": "Accepted corpus programs that ran inside their proven gas bound (each run got the bound as its entire budget)",
+      "milestone": "S5",
+      "value": 100,
+      "unit": "%",
+      "status": "measured",
+      "reproduce": "npm run verify"
+    },
+    {
+      "id": "verifier-no-false-reject",
+      "text": "Corpus programs that must be rejected but were accepted",
+      "milestone": "S5",
+      "value": 0,
+      "unit": "programs",
+      "status": "measured",
+      "reproduce": "npm run verify"
+    },
+    {
+      "id": "determinism",
+      "text": "Divergent executions across browser JS, native Rust and WASM runners",
+      "milestone": "S4",
+      "value": null,
+      "unit": "divergences",
+      "status": "not_measured",
+      "reproduce": "npm run fuzz:determinism"
+    },
+    {
+      "id": "gas-check-cost",
+      "text": "Cost of one basic-block gas check, upper bound (observed 1.78-2.54 ns over 30M-sample runs)",
+      "milestone": "S2",
+      "value": 3,
+      "unit": "ns",
+      "status": "measured",
+      "reproduce": "npm run bench:vm"
+    },
+    {
+      "id": "metering-overhead",
+      "text": "Wall-clock metering overhead: WITHDRAWN as a published number, because this machine's run-to-run spread (30-40%) cannot resolve a ~2.5% effect. Arithmetic estimate from the measured check cost stays in bench/vm.json",
+      "milestone": "S2",
+      "value": null,
+      "unit": "%",
+      "status": "withdrawn",
+      "reproduce": "npm run bench:vm"
+    },
+    {
+      "id": "perf-vs-v8",
+      "text": "Speed relative to V8 running equivalent JS, numeric loops (higher is better)",
+      "milestone": "S8",
+      "value": null,
+      "unit": "x",
+      "status": "not_measured",
+      "reproduce": "npm run bench:vm"
+    },
+    {
+      "id": "cold-start",
+      "text": "Time from prompt to first executed instruction, versus a container sandbox",
+      "milestone": "S8",
+      "value": null,
+      "unit": "ms",
+      "status": "not_measured",
+      "reproduce": "npm run bench:vm"
+    },
+    {
+      "id": "escape-challenge",
+      "text": "Successful sandbox escapes in the public challenge",
+      "milestone": "S9",
+      "value": null,
+      "unit": "escapes",
+      "status": "not_measured",
+      "reproduce": "npm run challenge:report"
+    },
+    {
+      "id": "llm-success-rate",
+      "text": "Held-out natural-language tasks compiled and passing their own properties",
+      "milestone": "S7",
+      "value": null,
+      "unit": "%",
+      "status": "not_measured",
+      "reproduce": "npm run bench:llm"
+    }
+  ]
+}
