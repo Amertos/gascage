@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+bench/out.json
+bench/vm.json
+bench/verify.json
+*.local
+.DS_Store

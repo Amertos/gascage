@@ -1,0 +1,31 @@
+{
+  "name": "gascage",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Trustworthy runtime for model-generated code: verified gas bounds, capability sandbox, deterministic replay.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build-core.mjs && node scripts/test.mjs",
+    "build:core": "node scripts/build-core.mjs",
+    "bench": "node scripts/bench.mjs",
+    "bench:vm": "node scripts/build-core.mjs && node scripts/bench-vm.mjs",
+    "verify": "node scripts/build-core.mjs && node scripts/verify-corpus.mjs",
+    "check": "npm run typecheck && npm run test && npm run verify && npm run bench && npm run bench:vm"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
