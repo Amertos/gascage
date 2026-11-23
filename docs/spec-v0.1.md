@@ -316,7 +316,7 @@ SMT-backed reasoning for loops whose variant is not a single counter — see §1
 ### 11.2 Red-team corpus (S6)
 
 Soundness that has never been attacked is a hypothesis. `corpus/attacks.json` is the adversary:
-48 programs whose only purpose is to obtain a certificate they do not deserve. `npm run attack`
+50 programs whose only purpose is to obtain a certificate they do not deserve. `npm run attack`
 enforces two rules, and CI runs it on every push.
 
 - **refused before execution** — the verifier must return the named diagnostic. Accepting one of
@@ -325,7 +325,7 @@ these is an escape.
 bound as its *entire* gas budget under adversarial arguments (negative parameters, zero
 iterations, indirect calls). Trapping there is also an escape.
 
-Measured: 25 refused, 39 accepted runs contained, 0 escapes. The corpus is deliberately hard to
+Measured: 25 refused, 39 accepted runs contained, 2 accepted-and-trapping runs inside the bound plus the surcharge, 0 escapes. The corpus is deliberately hard to
 satisfy from both sides — a verifier that rejects everything fails the 39 contained runs.
 
 Seven attacks defeated v0.1 before they were written down. The rule each violation broke, and
@@ -353,6 +353,11 @@ types that does not trap arithmetically, `f` terminates and spends at most
 traps remain visible: a program that divides by zero at runtime traps, and that trap is not
 predicted by the certificate. The bound is an upper bound on *completed* executions, not a
 promise that every execution completes without a trap.
+
+A trapping execution is bounded too, at `instantiate(gas, ā) + 1`: §9 charges one gas for the trap
+itself before raising it, so metering stays monotone through a trap. That surcharge is the reason
+the corpus distinguishes `traps` from `contained` — two programs in it are accepted, are allowed
+to trap, and are required to do so within the bound plus exactly that one gas.
 
 ## 12. Capabilities (v0.2 preview, model fixed now)
 
@@ -390,7 +395,7 @@ array length is part of the type and a longer one cannot be expressed by the han
 
 `corpus/examples.json` is the v0.1 conformance suite: 10 programs that must compile and run, 10 that must be rejected with the exact code shown. Each valid entry carries `args` and an `expected` result, so "runs" means *produces this value*, not *compiles*.
 
-`corpus/attacks.json` is the adversarial half (§11.2): 48 programs whose expected outcome is either a named refusal or containment under the proven bound. It has the same standing as the conformance suite — an attack may not be weakened or removed because it now passes for the wrong reason.
+`corpus/attacks.json` is the adversarial half (§11.2): 50 programs whose expected outcome is either a named refusal or containment under the proven bound. It has the same standing as the conformance suite — an attack may not be weakened or removed because it now passes for the wrong reason.
 
 Both are owned by this document, not by the implementation — adding a feature without a corpus entry is not allowed, and no corpus entry may be weakened to make an implementation pass.
 

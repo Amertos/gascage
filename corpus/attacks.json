@@ -1,7 +1,7 @@
 {
   "version": 1,
   "spec": "docs/spec-v0.1.md",
-  "note": "Red-team corpus for the verifier (S6). Owned by the spec, not by the implementation. 'rejected' attacks must be refused before execution with the given diagnostic; 'contained' programs are accepted, and must then run to completion inside the proven bound with the given adversarial arguments as their only gas budget. The five entries marked regression are holes that existed in v0.1 and are now closed — they are the reason this file exists.",
+  "note": "Red-team corpus for the verifier (S6). Owned by the spec, not by the implementation. 'rejected' attacks must be refused before execution with the given diagnostic; 'contained' programs are accepted, and must then run to completion inside the proven bound with the given adversarial arguments as their only gas budget; 'traps' programs are accepted and are allowed to trap arithmetically, but only inside the proven bound, because the certificate bounds gas and not the absence of traps (spec 11.3). The seven entries marked regression are holes that existed in v0.1 and are now closed — they are the reason this file exists.",
   "attacks": [
     {
       "id": "callee_parameter_substituted",
@@ -551,6 +551,28 @@
       "code": "E_INDEX_OOB",
       "why": "Constant indices are checked by the typechecker; 8 is past the end of a four-element array.",
       "source": "fn read(a: [f64; 4]) -> f64 {\n  return a[8];\n}"
+    },
+    {
+      "id": "counter_overflow_traps_inside_bound",
+      "vector": "gas",
+      "expect": "traps",
+      "trap": "IntOverflow",
+      "args": [],
+      "why": "The trip count is one, so the bound is small; the second step overflows i32. The certificate predicts gas, not arithmetic, so the only thing required is that the trap happens before the proven budget runs out.",
+      "source": "fn f() -> i32 {\n  let i: i32 = 2147483646;\n  while i < 2147483647 {\n    i = i + 2;\n  }\n  return i;\n}",
+      "fn": "f"
+    },
+    {
+      "id": "division_by_zero_traps_inside_bound",
+      "vector": "gas",
+      "expect": "traps",
+      "trap": "DivByZero",
+      "args": [
+        0
+      ],
+      "why": "A dynamic divisor is not rejected at compile time, so the runtime trap is the containment. It must land inside the proven bound, and the bound must be instantiated with the arguments actually used.",
+      "source": "fn f(d: i32) -> i32 {\n  let x: i32 = 100;\n  return x / d;\n}",
+      "fn": "f"
     }
   ]
 }

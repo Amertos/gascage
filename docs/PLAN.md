@@ -91,7 +91,7 @@ Abstract interpreter (interval + const + dužina niza), **inferencija granica pe
 
 ### S6a — Red-team korpus verifikatora (završeno)
 Napadi na sam dokaz, ne na VM: podmetanje argumenata kalema, uslovni i dvostruki korak petlje, telo petlje procenjeno prvom iteracijom, memorija preko arene, indeks bez dokazanog opsega, smer koraka protiv smera uslova.
-**Done:** `corpus/attacks.json` — 48 napada; 25 mora biti odbijeno pre izvršavanja, 23 moraju ostati u dokazanom bound-u pod neprijateljskim argumentima; 0 proboja; `npm run attack` u CI-ju. **Sedam napada je oborilo v0.1** i sada su regresioni testovi (spec §11.2).
+**Done:** `corpus/attacks.json` — 50 napada; 25 mora biti odbijeno pre izvršavanja, 23 moraju ostati u dokazanom bound-u pod neprijateljskim argumentima, 2 smeju da trapuju ali samo unutar bound-a + 1 gas za sam trap; 0 proboja; `npm run attack` u CI-ju. **Sedam napada je oborilo v0.1** i sada su regresioni testovi (spec §11.2).
 
 ### S6b — Capability runtime (5 dana, planirano)
 Grant model (atenuabilan), nema ambient authority (nema globalnog `fetch`/`Date`/`localStorage`).
@@ -124,7 +124,7 @@ Progress + preservation za core calculus; dokaz da verifikovani subset poštuje 
 | 4–5 | S3 | NL-ish program → bytecode, dva nezavisna implementatora |
 | 6 | S4 | replay radi kroz 3 engine-a |
 | 7–9 | S5 | **verifikator sa dokazanim gas bound-om** |
-| 10 | S6a | red-team korpus verifikatora, 0 proboja — **urađeno** (48 napada, 7 regresija) |
+| 10 | S6a | red-team korpus verifikatora, 0 proboja — **urađeno** (50 napada, 7 regresija) |
 | 11 | S7 | LLM → kod → izvršavanje, sa brojevima |
 | 12 | S8 | perf tabela |
 | 13 | S9 | escape challenge + objavljen izveštaj |

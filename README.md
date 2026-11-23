@@ -25,7 +25,7 @@ source text
 ```bash
 npm install
 npm run dev      # pick a program, see ACCEPTED or REJECTED, run it
-npm run check    # typecheck + 129 tests + verifier + red-team corpus + claim integrity
+npm run check    # typecheck + 131 tests + verifier + red-team corpus + claim integrity
 ```
 
 Node 20+ and npm. No API key, no account, no paid service anywhere in the toolchain.
@@ -48,6 +48,7 @@ These numbers come from `npm run check` on this repository and are re-derived on
 | Bounds that are exactly tight (zero slack) | **5 / 10** | |
 | Attacks refused before execution | **25 / 25** | `npm run attack` |
 | Accepted attacks that stay inside their proven bound | **39 / 39 runs** | adversarial arguments, bound as the only budget |
+| Accepted attacks that trap, inside the bound + 1 gas | **2 / 2** | the one gas §9 charges for the trap itself |
 | Escapes | **0** | CI fails on the first one |
 
 The tight ones are worth naming, because they are the ones that could not be faked:
@@ -64,7 +65,7 @@ battery_used        20 /  20
 
 ### Red-team result
 
-`corpus/attacks.json` holds 48 programs written to break the verifier rather than to be run. 25 must be refused with a named diagnostic; 23 are legitimate programs that must survive with deliberately hostile arguments (negative parameters, zero iterations, calls through two levels of indirection). Zero escapes: nothing that should be refused is accepted, and nothing accepted traps under its own bound.
+`corpus/attacks.json` holds 50 programs written to break the verifier rather than to be run. 25 must be refused with a named diagnostic; 23 are legitimate programs that must survive with deliberately hostile arguments (negative parameters, zero iterations, calls through two levels of indirection); 2 must be accepted and allowed to trap, but only inside the proven bound plus the one gas the VM charges for the trap itself. Zero escapes.
 
 Seven of those attacks **worked** against v0.1 before they were written down. They are tagged `regression` in the corpus and each one is now a test:
 
@@ -172,13 +173,13 @@ Read this part before the roadmap.
 | S3 | lexer → parser → typechecker → bytecode, 20/20 conformance | done |
 | S4 | deterministic block traces and replay | done |
 | S5 | verifier: proven gas and memory bounds | done |
-| S6a | red-team corpus: 48 attacks, 0 escapes | done |
+| S6a | red-team corpus: 50 attacks, 0 escapes | done |
 | S6b | capabilities (`module f(caps: wind, clock)`), 100-attack corpus | planned |
 | S7 | LLM front-end with grammar-constrained decoding | planned |
 | S8 | Rust VM, cross-engine trace comparison | planned |
 | S9 | public escape challenge | planned |
 
-S0–S6a are closed: 129 tests, 10/10 corpus conformance, 48 attacks with zero escapes, zero unproven numbers published. S6b–S9 are additive.
+S0–S6a are closed: 131 tests, 10/10 corpus conformance, 50 attacks with zero escapes, zero unproven numbers published. S6b–S9 are additive.
 
 ---
 
@@ -197,7 +198,7 @@ src/core/harness.ts     compile → verify → run, used by tests and the UI
 
 corpus/examples.json    10 valid programs with expected results,
                         10 invalid programs with expected error codes
-corpus/attacks.json     48 attacks: 25 must be refused, 23 must contain
+corpus/attacks.json     50 attacks: 25 refused, 23 contained, 2 may trap
 bench/claims.json       every published number, and nothing else
 docs/spec-v0.1.md       the language: grammar, types, determinism, gas
 docs/spec-v0.2-isa.md   the machine: blocks, instructions, traps
