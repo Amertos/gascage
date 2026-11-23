@@ -21,6 +21,8 @@ jobs:
         run: npm test
       - name: verifier (proven bounds)
         run: npm run verify
+      - name: red-team corpus (zero escapes)
+        run: npm run attack
       - name: bench harness (claim integrity)
         run: npm run bench
       - name: vm bench (metering cost)

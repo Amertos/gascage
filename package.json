@@ -14,7 +14,8 @@
     "bench": "node scripts/bench.mjs",
     "bench:vm": "node scripts/build-core.mjs && node scripts/bench-vm.mjs",
     "verify": "node scripts/build-core.mjs && node scripts/verify-corpus.mjs",
-    "check": "npm run typecheck && npm run test && npm run verify && npm run bench && npm run bench:vm"
+    "attack": "node scripts/build-core.mjs && node scripts/attack-corpus.mjs",
+    "check": "npm run typecheck && npm run test && npm run verify && npm run attack && npm run bench && npm run bench:vm"
   },
   "dependencies": {
     "react": "^18.3.1",

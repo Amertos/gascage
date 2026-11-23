@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-11-13",
+  "updated": "2026-11-23",
   "note": "A claim gets a number only when CI reproduces it. status=measured requires value and reproduce; any other status requires value=null. tests/claims.test.mjs enforces this.",
   "claims": [
     {
@@ -20,6 +20,15 @@
       "unit": "programs",
       "status": "measured",
       "reproduce": "npm run verify"
+    },
+    {
+      "id": "red-team-escapes",
+      "text": "Attacks on the verifier that obtained a certificate they did not deserve: accepted programs that trapped under their own bound, or programs that should have been refused but ran",
+      "milestone": "S6a",
+      "value": 0,
+      "unit": "attacks",
+      "status": "measured",
+      "reproduce": "npm run attack"
     },
     {
       "id": "determinism",

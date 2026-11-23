@@ -4,5 +4,6 @@ build/
 bench/out.json
 bench/vm.json
 bench/verify.json
+bench/attacks.json
 *.local
 .DS_Store
