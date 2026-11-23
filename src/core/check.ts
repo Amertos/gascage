@@ -6,6 +6,7 @@
 import { GsError } from './diagnostics';
 import type { BinOp, Expr, FnDecl, Module, Stmt, Type } from './ast';
 import { T, isIntegerType, isNumeric, typeEq, typeName } from './ast';
+import { loopVariant } from './variant';
 
 export interface FnInfo {
   name: string;
@@ -486,60 +487,18 @@ function calleesOf(fn: FnDecl): string[] {
 }
 
 /**
- * v0.1 loop bound: `while v < K` (or `> K`) where the body steps `v` by a
- * literal in the correct direction. Conservative on purpose — S5 replaces it
+ * v0.1 loop bound: `while v < K` (or `> K`) where the body advances `v` by a
+ * single constant step on every path. Conservative on purpose — S5 replaces it
  * with size-change/SMT reasoning, and anything unproven is rejected, never run.
+ *
+ * The analysis itself lives in `variant.ts` so the trip count the verifier
+ * charges and the termination argument here are the same rule.
  */
 function requireLoopBound(w: Extract<Stmt, { kind: 'while' }>): void {
-  const reject = (why: string): never => {
-    throw new GsError('E_UNBOUNDED_LOOP', `no provable bound: ${why}`, w.pos);
-  };
-
-  const c = w.cond;
-  if (c.kind !== 'bin') return reject('the condition is not a comparison');
-
-  let name = '';
-  let dir: 1 | -1 = 1;
-
-  // The limit may be any expression: termination only needs the step direction,
-  // while the *numeric* bound (and therefore the gas proof) is the verifier's job.
-  if (c.left.kind === 'var') {
-    name = c.left.name;
-    if (c.op === '<' || c.op === '<=') dir = 1;
-    else if (c.op === '>' || c.op === '>=') dir = -1;
-    else return reject('the condition must order a variable against a limit');
-  } else if (c.left.kind === 'num' && c.right.kind === 'var') {
-    name = c.right.name;
-    if (c.op === '<' || c.op === '<=') dir = -1;
-    else if (c.op === '>' || c.op === '>=') dir = 1;
-    else return reject('the condition must order a variable against a constant');
-  } else {
-    return reject('the condition must compare a variable with a constant');
+  const result = loopVariant(w.cond, w.body);
+  if (!result.ok) {
+    throw new GsError('E_UNBOUNDED_LOOP', `no provable bound: ${result.why}`, w.pos);
   }
-
-  if (!stepsInDirection(w.body, name, dir)) {
-    return reject(`"${name}" is not stepped by a constant towards the exit in the body`);
-  }
-}
-
-function stepsInDirection(stmts: Stmt[], name: string, dir: 1 | -1): boolean {
-  for (const s of stmts) {
-    if (s.kind === 'set' && s.name === name) {
-      const v = s.value;
-      if (v.kind === 'bin' && (v.op === '+' || v.op === '-')) {
-        const step = v.op === '+' ? 1 : -1;
-        const literal =
-          (v.left.kind === 'var' && v.left.name === name && v.right.kind === 'num') ||
-          (v.op === '+' && v.right.kind === 'var' && v.right.name === name && v.left.kind === 'num');
-        if (literal && step === dir && (v.right.kind === 'num' || v.left.kind === 'num')) return true;
-      }
-    }
-    if (s.kind === 'if' && (stepsInDirection(s.then, name, dir) || (s.els !== null && stepsInDirection(s.els, name, dir)))) {
-      return true;
-    }
-    if (s.kind === 'while' && stepsInDirection(s.body, name, dir)) return true;
-  }
-  return false;
 }
 
 export function checkModule(mod: Module): FnInfo[] {

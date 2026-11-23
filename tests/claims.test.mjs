@@ -23,7 +23,8 @@ test('no unproven number is published', () => {
 
 test('every claim names the milestone that will produce it', () => {
   for (const c of doc.claims) {
-    assert.match(c.milestone, /^S\d+$/, `${c.id}: milestone must look like S5`);
+    // S6a/S6b split the capability milestone from the red-team corpus.
+    assert.match(c.milestone, /^S\d+[a-z]?$/, `${c.id}: milestone must look like S5 or S6a`);
     assert.ok(c.text.length > 20, `${c.id}: claim text must say what is measured`);
   }
 });

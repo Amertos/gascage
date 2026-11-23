@@ -12,14 +12,28 @@
  * Rejection is the default: a loop whose trip count cannot be expressed is
  * refused with E_GAS_UNBOUNDED instead of being run under a timer.
  */
-import type { Expr, FnDecl, Stmt } from './ast';
+import type { Expr, FnDecl, Stmt, Type } from './ast';
 import { isIntegerType } from './ast';
 import { checkModule, type FnInfo } from './check';
 import * as C from './cost';
 import { GsError, type DiagnosticCode } from './diagnostics';
 import { parse } from './parser';
+import { DEFAULT_ARENA_ELEMENTS } from './program';
+import { loopVariant, type Variant } from './variant';
 
 const ELEMENT_BYTES = 8;
+const ARENA_BYTES = DEFAULT_ARENA_ELEMENTS * ELEMENT_BYTES;
+
+interface Sig {
+  params: string[];
+  cost: C.Form;
+  mem: C.Form;
+}
+
+interface Range {
+  lo: number;
+  hi: number;
+}
 
 type Val = { k: 'const'; v: number } | { k: 'param'; name: string } | { k: 'unknown' };
 
@@ -43,9 +57,10 @@ export type VerifyResult =
   | { ok: false; code: DiagnosticCode; detail: string };
 
 interface Ctx {
-  costs: Map<string, C.Form>;
-  mems: Map<string, C.Form>;
+  sigs: Map<string, Sig>;
   loops: { at: number; iters: C.Form }[];
+  /** Proven ranges of induction variables, innermost frame last. */
+  ranges: Map<string, Range>[];
 }
 
 const sZero = (): Sum => ({ cost: C.zero(), mem: C.zero() });
@@ -78,78 +93,174 @@ function invalidate(env: Env, names: Set<string>): void {
 
 // ---- loop trip counts -----------------------------------------------------
 
-function stepMagnitude(body: Stmt[], name: string): number | null {
-  for (const s of body) {
-    if (s.kind === 'set' && s.name === name) {
-      const v = s.value;
-      if (v.kind === 'bin' && (v.op === '+' || v.op === '-')) {
-        const literal =
-          (v.left.kind === 'var' && v.left.name === name && v.right.kind === 'num') ||
-          (v.op === '+' && v.right.kind === 'var' && v.right.name === name && v.left.kind === 'num');
-        if (!literal) continue;
-        const amount = v.right.kind === 'num' ? v.right.value : v.left.kind === 'num' ? v.left.value : 0;
-        if (!Number.isInteger(amount) || amount <= 0) return null;
-        return amount;
-      }
-    }
-    if (s.kind === 'if') {
-      const t = stepMagnitude(s.then, name);
-      if (t !== null) return t;
-      if (s.els !== null) {
-        const e = stepMagnitude(s.els, name);
-        if (e !== null) return e;
-      }
-    }
-  }
-  return null;
-}
-
-function loopIters(cond: Expr, body: Stmt[], env: Env): C.Form {
+function loopInfo(
+  cond: Expr,
+  body: Stmt[],
+  env: Env,
+): { iters: C.Form; variant: Variant } {
   const bad = (why: string): never => {
     throw new GsError('E_GAS_UNBOUNDED', `cannot bound loop: ${why}`, cond.pos);
   };
 
-  if (cond.kind !== 'bin') return bad('the condition is not a comparison');
-  if (cond.left.kind !== 'var') return bad('the counter must be the left operand');
+  // The step rule is shared with the checker: one analysis, one answer.
+  const result = loopVariant(cond, body);
+  if (!result.ok) return bad(result.why);
+  const variant = result.variant;
 
-  const name = cond.left.name;
-  const ascending = cond.op === '<' || cond.op === '<=';
-  const descending = cond.op === '>' || cond.op === '>=';
-  if (!ascending && !descending) return bad(`operator "${cond.op}" does not bound a counter`);
-
-  const step = stepMagnitude(body, name);
-  if (step === null) return bad(`"${name}" has no positive constant step`);
+  const name = variant.name;
+  const step = Math.abs(variant.delta);
+  const inclusive = variant.inclusive;
 
   const cnt = env.get(name) ?? { k: 'unknown' };
   if (cnt.k !== 'const') return bad(`"${name}" is not initialised to a constant`);
 
-  const lim = evalVal(cond.right, env);
-  const inclusive = cond.op === '<=' || cond.op === '>=';
+  const lim = evalVal(variant.limit, env);
 
-  if (ascending) {
+  if (variant.ascending) {
     if (lim.k === 'const') {
       const span = lim.v - cnt.v;
-      if (span < 0) return C.constForm(0);
+      if (span < 0) return { iters: C.constForm(0), variant };
       const k = inclusive
         ? Math.max(0, Math.floor(span / step) + 1)
         : Math.max(0, Math.ceil(span / step));
-      return C.constForm(k);
+      return { iters: C.constForm(k), variant };
     }
     if (lim.k === 'param') {
       // Sound over-approximation for any real value of the parameter: p/step + 1.
       const terms = new Map<string, number>([[lim.name, 1 / step]]);
-      return { base: 1 + Math.max(0, -cnt.v / step), terms };
+      return { iters: { base: 1 + Math.max(0, -cnt.v / step), terms }, variant };
     }
     return bad('the limit is neither a constant nor a parameter');
   }
 
   if (lim.k !== 'const') return bad('a descending loop must end at a constant');
   const span = cnt.v - lim.v;
-  if (span < 0) return C.constForm(0);
+  if (span < 0) return { iters: C.constForm(0), variant };
   const k = inclusive
     ? Math.max(0, Math.floor(span / step) + 1)
     : Math.max(0, Math.ceil(span / step));
-  return C.constForm(k);
+  return { iters: C.constForm(k), variant };
+}
+
+/** Range the counter provably takes inside the loop body, or null. */
+function rangeFor(variant: Variant, env: Env): Range | null {
+  const start = env.get(variant.name);
+  const lim = evalVal(variant.limit, env);
+  if (start === undefined || start.k !== 'const' || lim.k !== 'const') return null;
+
+  const range = variant.ascending
+    ? {
+        lo: start.v,
+        hi: variant.inclusive ? lim.v : lim.v - 1,
+      }
+    : {
+        lo: variant.inclusive ? lim.v : lim.v + 1,
+        hi: start.v,
+      };
+
+  return range.lo <= range.hi ? range : null;
+}
+
+// ---- value forms ----------------------------------------------------------
+
+/**
+ * A non-negative linear form that bounds the value of `e` from above.
+ *
+ * Used to rebind a callee's cost form at the call site. Anything not expressible
+ * here returns null, and the call is refused `E_GAS_UNBOUNDED`: a caller whose
+ * argument cost could not be expressed would otherwise inherit a bound that is
+ * silently short.
+ */
+function valueForm(e: Expr, env: Env, ctx: Ctx): C.Form | null {
+  switch (e.kind) {
+    case 'num':
+      return C.constForm(Math.abs(e.value));
+
+    case 'var': {
+      const v = env.get(e.name);
+      if (v !== undefined) {
+        if (v.k === 'const') return C.constForm(Math.abs(v.v));
+        if (v.k === 'param') return { base: 0, terms: new Map([[v.name, 1]]) };
+      }
+      // Inside a loop the counter is no longer a constant; fall back to the
+      // range the loop proof established, at its largest magnitude.
+      for (let i = ctx.ranges.length - 1; i >= 0; i -= 1) {
+        const range = ctx.ranges[i]?.get(e.name);
+        if (range !== undefined) {
+          return C.constForm(Math.max(Math.abs(range.lo), Math.abs(range.hi)));
+        }
+      }
+      return null;
+    }
+
+    case 'bin': {
+      if (e.op === '+') {
+        const l = valueForm(e.left, env, ctx);
+        const r = valueForm(e.right, env, ctx);
+        return l === null || r === null ? null : C.add(l, r);
+      }
+      if (e.op === '-') {
+        // `a - b` is bounded above by `|a| + |b|`; loose, never short.
+        const l = valueForm(e.left, env, ctx);
+        const r = valueForm(e.right, env, ctx);
+        return l === null || r === null ? null : C.add(l, r);
+      }
+      if (e.op === '*') {
+        const l = valueForm(e.left, env, ctx);
+        const r = valueForm(e.right, env, ctx);
+        if (l === null || r === null) return null;
+        try {
+          return C.mul(l, r);
+        } catch {
+          return null; // product of two symbolic arguments: refuse it
+        }
+      }
+      return null;
+    }
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * A verified program must not be able to index outside an array: a raw arena
+ * read would let one array observe another. Literals are checked by the
+ * typechecker; here we require a proven range, which a bounded loop counter
+ * inside `while i < len` provides.
+ */
+function proveIndex(index: Expr, len: number, env: Env, ctx: Ctx): void {
+  const reject = (why: string): never => {
+    throw new GsError('E_INDEX_OOB', `cannot prove index is in [0, ${len}): ${why}`, index.pos);
+  };
+
+  if (index.kind === 'num') {
+    if (!Number.isInteger(index.value) || index.value < 0 || index.value >= len) {
+      reject(`literal index ${index.value} is outside the array`);
+    }
+    return;
+  }
+
+  if (index.kind === 'var') {
+    // A variable that still holds a literal is as good as the literal.
+    const value = env.get(index.name);
+    if (value !== undefined && value.k === 'const') {
+      if (!Number.isInteger(value.v) || value.v < 0 || value.v >= len) {
+        reject(`"${index.name}" holds ${value.v}, which is outside the array`);
+      }
+      return;
+    }
+
+    for (let i = ctx.ranges.length - 1; i >= 0; i -= 1) {
+      const range = ctx.ranges[i]?.get(index.name);
+      if (range === undefined) continue;
+      if (range.lo >= 0 && range.hi < len) return;
+      reject(`"${index.name}" ranges over [${range.lo}, ${range.hi}]`);
+    }
+    return reject(`"${index.name}" has no proven range in this loop`);
+  }
+
+  return reject('the index is not a literal or a bounded loop counter');
 }
 
 // ---- cost of expressions --------------------------------------------------
@@ -183,6 +294,16 @@ function exprSum(e: Expr, env: Env, ctx: Ctx): Sum {
     case 'index': {
       const target = exprSum(e.target, env, ctx);
       const idx = exprSum(e.index, env, ctx);
+      const arr = e.target.type;
+      if (arr !== undefined && arr.kind === 'array') {
+        proveIndex(e.index, arr.len, env, ctx);
+      } else {
+        throw new GsError(
+          'E_INDEX_OOB',
+          'cannot prove an index into an expression whose type is unknown',
+          e.pos,
+        );
+      }
       return {
         cost: C.add(C.add(target.cost, idx.cost), C.constForm(3)),
         mem: C.add(target.mem, idx.mem),
@@ -217,11 +338,33 @@ function exprSum(e: Expr, env: Env, ctx: Ctx): Sum {
         return { cost: C.add(args.cost, C.constForm(2)), mem: args.mem };
       }
 
-      const calleeCost = ctx.costs.get(e.name);
-      const calleeMem = ctx.mems.get(e.name);
-      if (calleeCost === undefined || calleeMem === undefined) {
+      const sig = ctx.sigs.get(e.name);
+      if (sig === undefined) {
         throw new GsError('E_GAS_UNBOUNDED', `call to "${e.name}" was not verified first`, e.pos);
       }
+
+      // A callee's bound is a form over the *callee's* parameters. Charging it
+      // unsubstituted would drop every term (the caller has no such parameter)
+      // and undercount gas by the whole cost of the callee's loops.
+      const argForms = e.args.map((a) => valueForm(a, env, ctx));
+      const bind = (i: number, _name: string): C.Form | null => argForms[i] ?? null;
+
+      let calleeCost: C.Form;
+      let calleeMem: C.Form;
+      try {
+        calleeCost = C.substitute(sig.cost, sig.params, bind);
+        calleeMem = C.substitute(sig.mem, sig.params, bind);
+      } catch (err) {
+        if (err instanceof C.NonlinearCost) {
+          throw new GsError(
+            'E_GAS_UNBOUNDED',
+            `call to "${e.name}": ${err.message}`,
+            e.pos,
+          );
+        }
+        throw err;
+      }
+
       return {
         cost: C.add(C.add(args.cost, calleeCost), C.constForm(5)), // CALL
         mem: C.add(args.mem, calleeMem),
@@ -308,11 +451,25 @@ function walkStmt(s: Stmt, env: Env, ctx: Ctx): Sum {
     }
 
     case 'while': {
-      const iters = loopIters(s.cond, s.body, env);
+      const info = loopInfo(s.cond, s.body, env);
+      const iters = info.iters;
       ctx.loops.push({ at: s.pos, iters });
 
       const condSum = exprSum(s.cond, env, ctx);
-      const bodySum = walkStmts(s.body, new Map(env), ctx);
+
+      const frame = new Map(ctx.ranges[ctx.ranges.length - 1] ?? []);
+      const range = rangeFor(info.variant, env);
+      if (range !== null) frame.set(info.variant.name, range);
+      ctx.ranges.push(frame);
+
+      // The body is charged once, so it must be priced for *any* iteration, not
+      // for the values the first iteration happens to start with. Anything the
+      // body assigns is therefore unknown here; loop counters are recovered
+      // through `frame` above, never through a stale constant.
+      const bodyEnv = new Map(env);
+      invalidate(bodyEnv, assignedNames(s.body));
+      const bodySum = walkStmts(s.body, bodyEnv, ctx);
+      ctx.ranges.pop();
 
       const checks = C.add(condSum.cost, C.constForm(1)); // condition + JZ
       const perIter = C.add(bodySum.cost, C.constForm(1)); // body + JMP back
@@ -411,25 +568,66 @@ function callees(fn: FnDecl): string[] {
   return out;
 }
 
+/** Largest value a parameter of this type can take, used for the memory bound. */
+function worstValue(t: Type): number {
+  if (t.kind === 'i32') return 2147483647;
+  if (t.kind === 'i64') return 9223372036854775807;
+  if (t.kind === 'f64') return Number.MAX_SAFE_INTEGER;
+  return 0; // bool/unit/array parameters cannot scale an allocation
+}
+
+/**
+ * A certificate may only mention its own function's parameters.
+ *
+ * If a term from a callee ever leaked into a caller's form, `instantiate` would
+ * read it as zero and publish a bound that is too small. Refusing to certify is
+ * the safe failure: no certificate, no execution.
+ */
+function seal(f: C.Form, params: readonly string[], fn: string): void {
+  for (const name of f.terms.keys()) {
+    if (!params.includes(name)) {
+      throw new GsError(
+        'E_GAS_UNBOUNDED',
+        `refusing to certify "${fn}": its bound mentions "${name}", which is not a parameter of "${fn}"`,
+      );
+    }
+  }
+}
+
 export function verifyModule(mod: ReturnType<typeof parse>): VerifyResult {
   try {
     const infos = checkModule(mod);
-    const ctx: Ctx = { costs: new Map(), mems: new Map(), loops: [] };
+    const ctx: Ctx = { sigs: new Map(), loops: [], ranges: [] };
     const certs: Certificate[] = [];
 
     for (const info of postOrder(infos)) {
       const env: Env = new Map();
       for (const p of info.decl.params) env.set(p.name, { k: 'param', name: p.name });
 
-      const ctxForFn: Ctx = { costs: ctx.costs, mems: ctx.mems, loops: [] };
+      const ctxForFn: Ctx = { sigs: ctx.sigs, loops: [], ranges: [] };
       const body = walkStmts(info.decl.body, env, ctxForFn);
 
       // The lowerer appends `CONST 0; RET` (4 gas) to every function, but that
       // block is unreachable when the typechecker proved that every path returns.
       const gas = allPathsReturn(info.decl.body) ? body.cost : C.add(body.cost, C.constForm(4));
 
-      ctx.costs.set(info.name, gas);
-      ctx.mems.set(info.name, body.mem);
+      const paramNames = info.decl.params.map((p) => p.name);
+      seal(gas, paramNames, info.name);
+      seal(body.mem, paramNames, info.name);
+
+      // The arena is fixed, so the memory bound must hold for every legal
+      // argument, not just the ones the example happens to pass.
+      const worst = new Map(info.decl.params.map((p) => [p.name, worstValue(p.type)]));
+      const worstMem = C.instantiate(body.mem, worst);
+      if (worstMem > ARENA_BYTES) {
+        throw new GsError(
+          'E_MEMORY',
+          `"${info.name}" can allocate ${worstMem} bytes, more than the ${ARENA_BYTES}-byte arena`,
+          info.decl.pos,
+        );
+      }
+
+      ctx.sigs.set(info.name, { params: paramNames, cost: gas, mem: body.mem });
 
       certs.push({
         fn: info.name,

@@ -29,6 +29,9 @@ export interface AsmFn {
   blockCosts: number[];
 }
 
+/** 1 MiB of 8-byte elements. The verifier refuses programs that can outgrow it. */
+export const DEFAULT_ARENA_ELEMENTS = 131072;
+
 export interface AsmProg {
   fns: AsmFn[];
   main: number;
@@ -182,7 +185,7 @@ export class Builder {
     return {
       fns,
       main,
-      arenaElements: options.arenaElements ?? 131072, // 1 MiB of 8-byte elements
+      arenaElements: options.arenaElements ?? DEFAULT_ARENA_ELEMENTS,
     };
   }
 }

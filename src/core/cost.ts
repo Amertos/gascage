@@ -50,6 +50,36 @@ export function maxForm(a: Form, b: Form): Form {
 }
 
 /**
+ * Rebinds a cost form's parameters to argument forms.
+ *
+ * A callee's certificate is a form over the *callee's* parameters. Charging it at
+ * a call site without substitution silently drops those terms (the caller has no
+ * such parameter, so `instantiate` would read zero) and undercounts the gas by
+ * whatever the loop would have cost. That is exactly the bug this function
+ * exists to make impossible.
+ *
+ * `argFor` is required only for parameters the form actually mentions, so array
+ * arguments — which never appear in a cost form — need no numeric form.
+ */
+export function substitute(
+  f: Form,
+  params: readonly string[],
+  argFor: (index: number, name: string) => Form | null,
+): Form {
+  let out = constForm(f.base);
+  for (const [name, coef] of f.terms) {
+    const i = params.indexOf(name);
+    if (i < 0) throw new NonlinearCost(`cost form mentions "${name}", which is not a parameter`);
+    const arg = argFor(i, name);
+    if (arg === null) {
+      throw new NonlinearCost(`argument ${i + 1} of the call is not a constant or a parameter`);
+    }
+    out = add(out, scale(arg, coef));
+  }
+  return out;
+}
+
+/**
  * Evaluates a cost form at concrete arguments.
  *
  * Magnitudes, not signed values: a symbolic loop count is `p/step`, which is an
@@ -60,7 +90,12 @@ export function maxForm(a: Form, b: Form): Form {
  */
 export function instantiate(f: Form, args: ReadonlyMap<string, number>): number {
   let total = f.base;
-  for (const [name, coef] of f.terms) total += coef * Math.abs(args.get(name) ?? 0);
+  for (const [name, coef] of f.terms) {
+    // `|coef|` is belt-and-braces: substitution normalises arguments to
+    // magnitudes, and this keeps a negative coefficient from ever turning into a
+    // discount if a future analysis produces one.
+    total += Math.abs(coef) * Math.abs(args.get(name) ?? 0);
+  }
   return Math.max(0, Math.ceil(total));
 }
 
