@@ -313,6 +313,47 @@ Measured on the v0.1 corpus: 10/10 accepted programs run inside their bound, 0 p
 must be rejected are accepted, and 5/10 bounds are exactly tight (zero slack). Residual work is
 SMT-backed reasoning for loops whose variant is not a single counter — see §15.
 
+### 11.2 Red-team corpus (S6)
+
+Soundness that has never been attacked is a hypothesis. `corpus/attacks.json` is the adversary:
+48 programs whose only purpose is to obtain a certificate they do not deserve. `npm run attack`
+enforces two rules, and CI runs it on every push.
+
+- **refused before execution** — the verifier must return the named diagnostic. Accepting one of
+these is an escape.
+- **contained** — the program is legitimate, so it is accepted, and then executed with the proven
+bound as its *entire* gas budget under adversarial arguments (negative parameters, zero
+iterations, indirect calls). Trapping there is also an escape.
+
+Measured: 25 refused, 39 accepted runs contained, 0 escapes. The corpus is deliberately hard to
+satisfy from both sides — a verifier that rejects everything fails the 39 contained runs.
+
+Seven attacks defeated v0.1 before they were written down. The rule each violation broke, and
+what now enforces it:
+
+| # | Violation | Enforcement |
+|---|---|---|
+| A1 | A callee's bound was charged at the call site unsubstituted, so its parameter terms were read as zero and gas was undercounted by the whole cost of the callee's loops | `cost.substitute` rebinds to argument forms (constants, parameters, linear combinations, or the proven range of a loop counter); anything else is `E_GAS_UNBOUNDED`. `seal` refuses a certificate that mentions a parameter that is not its own |
+| A2 | A step inside one `if` arm counted as progress for the whole body | O3 is decided by `variant.ts`: exactly one constant step, guaranteed on every path |
+| A3 | Two steps to the same counter (`i = i + 1; i = i - 1`) were treated as one | same analysis: a second assignment to the counter refuses the loop |
+| A4 | A loop body was priced using the constant values of its *first* iteration, so `g(i)` was priced as `g(0)` | the body environment is invalidated before pricing; counters are recovered from the proven range, not from a stale constant |
+| A5 | The memory bound was never compared to the arena, so an accepted program could trap `OutOfMemory` under its own bound | O5 is checked over parameter maxima; worst-case allocation above 1 MiB is `E_MEMORY` |
+| A6 | Indices were only checked when literal, so `a[n]` could read across array boundaries in the arena | O2 requires a literal, a constant variable, or an induction variable with a proven range inside the length |
+| A7 | A step's sign was not checked against the condition, so `i = i + 1` inside `while i > k` counted | direction of the step must match the direction of the condition |
+
+A4 is the instructive one: O1–O6 were all nominally discharged, and the certificate was still
+short. The lesson recorded here is that a cost model is only as sound as the *environment* it is
+evaluated in, not just the instructions it adds up.
+
+### 11.3 What the certificate guarantees, precisely
+
+For an accepted function `f` with parameters `p̄` and any argument vector `ā` of the declared
+types that does not trap arithmetically, `f` terminates and spends at most
+`instantiate(gas, ā)` gas and allocates at most `instantiate(memoryBytes, ā)` bytes. Arithmetic
+traps remain visible: a program that divides by zero at runtime traps, and that trap is not
+predicted by the certificate. The bound is an upper bound on *completed* executions, not a
+promise that every execution completes without a trap.
+
 ## 12. Capabilities (v0.2 preview, model fixed now)
 
 v0.1 is pure, so no capability is reachable. The model is nonetheless fixed now so the compiler is built for it:
@@ -347,7 +388,11 @@ array length is part of the type and a longer one cannot be expressed by the han
 
 ## 14. Conformance
 
-`corpus/examples.json` is the v0.1 conformance suite: 10 programs that must compile and run, 10 that must be rejected with the exact code shown. Each valid entry carries `args` and an `expected` result, so "runs" means *produces this value*, not *compiles*. It is owned by this document, not by the implementation — adding a feature without a corpus entry is not allowed, and no corpus entry may be weakened to make an implementation pass.
+`corpus/examples.json` is the v0.1 conformance suite: 10 programs that must compile and run, 10 that must be rejected with the exact code shown. Each valid entry carries `args` and an `expected` result, so "runs" means *produces this value*, not *compiles*.
+
+`corpus/attacks.json` is the adversarial half (§11.2): 48 programs whose expected outcome is either a named refusal or containment under the proven bound. It has the same standing as the conformance suite — an attack may not be weakened or removed because it now passes for the wrong reason.
+
+Both are owned by this document, not by the implementation — adding a feature without a corpus entry is not allowed, and no corpus entry may be weakened to make an implementation pass.
 
 ## 15. Open questions for v0.2
 

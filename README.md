@@ -25,7 +25,7 @@ source text
 ```bash
 npm install
 npm run dev      # pick a program, see ACCEPTED or REJECTED, run it
-npm run check    # typecheck + 63 tests + verifier + claim integrity
+npm run check    # typecheck + 129 tests + verifier + red-team corpus + claim integrity
 ```
 
 Node 20+ and npm. No API key, no account, no paid service anywhere in the toolchain.
@@ -46,6 +46,9 @@ These numbers come from `npm run check` on this repository and are re-derived on
 | Programs that must be rejected but were accepted | **0** | 10 invalid programs, each must fail with its documented code |
 | Valid programs wrongly rejected | **0** | |
 | Bounds that are exactly tight (zero slack) | **5 / 10** | |
+| Attacks refused before execution | **25 / 25** | `npm run attack` |
+| Accepted attacks that stay inside their proven bound | **39 / 39 runs** | adversarial arguments, bound as the only budget |
+| Escapes | **0** | CI fails on the first one |
 
 The tight ones are worth naming, because they are the ones that could not be faked:
 
@@ -59,6 +62,24 @@ battery_used        20 /  20
 
 `s.dot(float)` and `min_of` and friends account for the slack in the other five; the loosest bound in the corpus is 12 gas. Average slack: 2.8 gas.
 
+### Red-team result
+
+`corpus/attacks.json` holds 48 programs written to break the verifier rather than to be run. 25 must be refused with a named diagnostic; 23 are legitimate programs that must survive with deliberately hostile arguments (negative parameters, zero iterations, calls through two levels of indirection). Zero escapes: nothing that should be refused is accepted, and nothing accepted traps under its own bound.
+
+Seven of those attacks **worked** against v0.1 before they were written down. They are tagged `regression` in the corpus and each one is now a test:
+
+| Hole | Symptom | Fix |
+|---|---|---|
+| Callee bound not substituted at the call site | `helper(1000)` proved **43** gas for a program costing ~13,000 | `substitute()` rebinding the callee's form to the caller's arguments; a certificate may only mention its own parameters |
+| Unconditional-step rule | `while i < n { if c { i = i + 1 } }` accepted — no progress when `c` is false | one variant analysis (`variant.ts`) shared by checker and verifier: exactly one constant step on every path |
+| Multiple steps to the same counter | `i = i + 1; i = i - 1` accepted | the same analysis rejects any second assignment to the counter |
+| Loop body priced at the first iteration | `g(i)` inside `while i < 4` priced as `g(0)` | body env invalidated before pricing; arguments bound through the proven counter range |
+| Memory bound ignored the arena | 3.2 MB proven for a 1 MiB arena; the run died `OutOfMemory` under a "proven" bound | worst-case memory over parameter maxima, refused with `E_MEMORY` |
+| Parameter indices unchecked | `a[n]` read across array boundaries in the arena | `E_INDEX_OOB` unless the index is a literal, a constant variable, or a counter with a proven range inside the length |
+| Directional steps | `i = i + 1` in a `>` loop accepted | direction of the step checked against the direction of the condition |
+
+Those are the reason the corpus exists. A verifier that has never been attacked is a hypothesis.
+
 ### Runtime cost
 
 | Metric | Value | How |
@@ -70,7 +91,7 @@ battery_used        20 /  20
 
 Wall-clock metering overhead was supposed to be the headline efficiency claim. On this machine the on/off delta swings between −0.6% and +13.9% across runs — the noise is larger than the ~2.5% effect. Rather than publish whichever end of the range flattered the code, `metering-overhead` is marked **withdrawn** in `bench/claims.json`, and the arithmetic estimate stays in `bench/vm.json` with the spread attached.
 
-The claims table currently reads: **3 measured, 5 not measured, 1 withdrawn.**
+The claims table currently reads: **4 measured, 5 not measured, 1 withdrawn.**
 
 ---
 
@@ -133,6 +154,7 @@ There is no separate marketing copy to drift out of sync, because there is no ma
 Read this part before the roadmap.
 
 - **No SMT solver.** Loops whose variant is not a single counter are rejected rather than analysed. Z3 is planned for the residual obligations, not implemented.
+- **Conservative, by construction.** Anything the cost model cannot express is refused, not approximated: a call whose argument is not a constant, a parameter or a bounded counter; a loop whose counter is reset on one path; an index that is not a literal or a proven counter. The memory bound is worst-case over parameter maxima, so it can reject a program that would be fine for the specific arguments you had in mind. That is the price of the bound being a proof rather than a guess.
 - **No cross-engine determinism yet.** Traces are deterministic within the one JS engine. The stronger claim — two independent implementations producing identical trace hashes — waits for the Rust VM.
 - **No capabilities.** The sandbox has no ambient authority because the language cannot perform effects at all. That is a weaker statement than "the sandbox is secure" and should be read as such.
 - **The UI is one panel.** Pick a program, read a verdict, run it. No editor, no trace viewer.
@@ -150,12 +172,13 @@ Read this part before the roadmap.
 | S3 | lexer → parser → typechecker → bytecode, 20/20 conformance | done |
 | S4 | deterministic block traces and replay | done |
 | S5 | verifier: proven gas and memory bounds | done |
-| S6 | capabilities, 100-attack red-team corpus | planned |
+| S6a | red-team corpus: 48 attacks, 0 escapes | done |
+| S6b | capabilities (`module f(caps: wind, clock)`), 100-attack corpus | planned |
 | S7 | LLM front-end with grammar-constrained decoding | planned |
 | S8 | Rust VM, cross-engine trace comparison | planned |
 | S9 | public escape challenge | planned |
 
-S0–S5 are the v0.1 thesis and are closed: 63 tests, 10/10 corpus conformance, zero unproven numbers published. S6–S9 are additive.
+S0–S6a are closed: 129 tests, 10/10 corpus conformance, 48 attacks with zero escapes, zero unproven numbers published. S6b–S9 are additive.
 
 ---
 
@@ -167,17 +190,19 @@ src/core/program.ts     assembler; attaches cost to each basic block
 src/core/vm.ts          the VM: arena, gas counter, nine traps
 src/core/{lexer,parser,check,lower,compiler}.ts   gs v0.1 front-end
 src/core/cost.ts        linear cost forms over parameters
+src/core/variant.ts     the one loop-variant rule, shared by check and verify
 src/core/verify.ts      the verifier and its certificate
 src/core/trace.ts       deterministic block trace, FNV-1a hashing
 src/core/harness.ts     compile → verify → run, used by tests and the UI
 
 corpus/examples.json    10 valid programs with expected results,
                         10 invalid programs with expected error codes
+corpus/attacks.json     48 attacks: 25 must be refused, 23 must contain
 bench/claims.json       every published number, and nothing else
 docs/spec-v0.1.md       the language: grammar, types, determinism, gas
 docs/spec-v0.2-isa.md   the machine: blocks, instructions, traps
 docs/PLAN.md            S0–S10 with gates and the notes on what changed
-scripts/                test runner, verifier driver, two benchmarks
+scripts/                test runner, verifier and red-team drivers, two benchmarks
 tests/                  node:test suites
 ```
 

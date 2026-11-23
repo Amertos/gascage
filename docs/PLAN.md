@@ -87,11 +87,15 @@ Abstract interpreter (interval + const + dužina niza), **inferencija granica pe
 
 > Fallback nije bio potreban, ali je otkrio pravu stvar: bound je bio **nesiguran** (potcenjen) dok god je lowering mešao putanje u isti blok. Test „pusti sa bound-om kao jedinim budžetom“ je jedini razlog što je to izašlo na videlo pre nego što je claim objavljen.
 
-> **Status v0.1 je zatvoren:** kompajler, VM, verifikator i deterministički trace rade i pokriveni su sa 63 testa. S6–S9 su aditivne faze (capability-ji traže jezik sa efektima, S7 traži lokalni model, S8 Rust VM, S9 javni CTF) i imaju svoje specifikacije u ovom planu.
+> **Status v0.1 je zatvoren:** kompajler, VM, verifikator i deterministički trace rade i pokriveni su sa 129 testa. S6a je takođe zatvoren. S6b–S9 su aditivne faze (capability-ji traže jezik sa efektima, S7 traži lokalni model, S8 Rust VM, S9 javni CTF) i imaju svoje specifikacije u ovom planu.
 
-### S6 — Capability runtime (5 dana)
+### S6a — Red-team korpus verifikatora (završeno)
+Napadi na sam dokaz, ne na VM: podmetanje argumenata kalema, uslovni i dvostruki korak petlje, telo petlje procenjeno prvom iteracijom, memorija preko arene, indeks bez dokazanog opsega, smer koraka protiv smera uslova.
+**Done:** `corpus/attacks.json` — 48 napada; 25 mora biti odbijeno pre izvršavanja, 23 moraju ostati u dokazanom bound-u pod neprijateljskim argumentima; 0 proboja; `npm run attack` u CI-ju. **Sedam napada je oborilo v0.1** i sada su regresioni testovi (spec §11.2).
+
+### S6b — Capability runtime (5 dana, planirano)
 Grant model (atenuabilan), nema ambient authority (nema globalnog `fetch`/`Date`/`localStorage`).
-**Done:** korpus od 100 modelom generisanih napada (eksfiltracija, alloc bomb, loop bomb, capability forgery, timing) — svaki ima test koji dokazuje kontejnment.
+**Done:** korpus od 100 modelom generisanih napada (eksfiltracija, alloc bomb, loop bomb, capability forgery, timing) — svaki ima test koji dokazuje kontejnment. Napomena: capability deo traži jezik sa efektima; S6a pokriva napade na verifikator, ne na capsule.
 
 ### S7 — LLM front-end (5–7 dana)
 Constrained decoding (JSON-schema → grammar), type-directed repair loop, **model predlaže property-je → fuzzer ih falsifikuje → pušta se samo preživeli program**.
@@ -120,7 +124,7 @@ Progress + preservation za core calculus; dokaz da verifikovani subset poštuje 
 | 4–5 | S3 | NL-ish program → bytecode, dva nezavisna implementatora |
 | 6 | S4 | replay radi kroz 3 engine-a |
 | 7–9 | S5 | **verifikator sa dokazanim gas bound-om** |
-| 10 | S6 | red-team korpus, 0 proboja |
+| 10 | S6a | red-team korpus verifikatora, 0 proboja — **urađeno** (48 napada, 7 regresija) |
 | 11 | S7 | LLM → kod → izvršavanje, sa brojevima |
 | 12 | S8 | perf tabela |
 | 13 | S9 | escape challenge + objavljen izveštaj |
